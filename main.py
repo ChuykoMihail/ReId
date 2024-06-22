@@ -14,7 +14,7 @@ tracker = check_yaml('my_botsort.yml')
 cfg = IterableSimpleNamespace(**yaml_load(tracker))
 
 
-my_tracker = MyTracker(args=cfg)
+my_tracker = MyTracker(args=cfg, re_id_model_path='../solider_reid_msmt17.onnx')
 
 # Open the video file
 video_path = "cam2.mp4"

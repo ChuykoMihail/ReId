@@ -2,23 +2,37 @@ from ultralytics.trackers import BOTSORT
 from ultralytics.trackers.byte_tracker import TrackState, STrack
 from ultralytics.trackers.bot_sort import BOTrack
 from ultralytics.trackers.utils import matching
+from ultralytics.engine.results import Results
 import numpy as np
+import torch
 
 from re_id_onnx import ReIdOnnx
 
 
-# class ReIdState:
-#     IdRequested = 0
-#      = 1
-#     Lost = 2
-#     Removed = 3
+class ReIdState:
+    New = 0
+    IdRequested = 1
+    GotId = 2
+    Lost = 3
 
 class ReIdTrack(BOTrack):
     def __init__(self, xywh, score, cls):
-        self.is_id_restored = False
+        self.is_id_state: ReIdState = None
         self.re_id = 0
-
         super().__init__(xywh, score, cls)
+
+    def update(self, new_track, frame_id):
+        super().update(new_track, frame_id)
+
+    def mark_removed(self):
+        # отправить инфу в тарантул
+        return super().mark_removed()
+
+    def activate(self, kalman_filter, frame_id):
+        # запрос нового id
+        self.re_id_state = ReIdState.IdRequested
+        super().activate(kalman_filter, frame_id)
+        
 
 
 
@@ -38,7 +52,7 @@ class MyTracker(BOTSORT):
         else:
             return [ReIdTrack(xyxy, s, c) for (xyxy, s, c) in zip(dets, scores, cls)]  # detections
 
-    def update(self, results, img=None):
+    def update(self, results: Results, img=None):
         """Updates object tracker with new detections and returns tracked object bounding boxes."""
         self.frame_id += 1
         activated_stracks = []
@@ -132,6 +146,12 @@ class MyTracker(BOTSORT):
             track = detections[inew]
             if track.score < self.args.new_track_thresh:
                 continue
+            # t_ltwh = np.asarray(xywh2ltwh(results.xywh[:4]), dtype=np.float32) 
+            t_ltwh = track.tlwh.astype(int)
+            print(t_ltwh)
+            cropped = img[t_ltwh[1]:t_ltwh[1]+t_ltwh[3], t_ltwh[0]:t_ltwh[0]+t_ltwh[2]]
+            track.curr_feat = self.re_id_model.get_features(cropped)
+            print(track.curr_feat)
             track.activate(self.kalman_filter, self.frame_id)
             activated_stracks.append(track)
         # Step 5: Update state
@@ -165,3 +185,20 @@ class MyTracker(BOTSORT):
                 return 'Removed'
             case _:
                 return 'Unknown'
+
+
+
+def xywh2ltwh(x):
+    """
+    Convert the bounding box format from [x, y, w, h] to [x1, y1, w, h], where x1, y1 are the top-left coordinates.
+
+    Args:
+        x (np.ndarray | torch.Tensor): The input tensor with the bounding box coordinates in the xywh format
+
+    Returns:
+        y (np.ndarray | torch.Tensor): The bounding box coordinates in the xyltwh format
+    """
+    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y[..., 0] = x[..., 0] - x[..., 2] / 2  # top left x
+    y[..., 1] = x[..., 1] - x[..., 3] / 2  # top left y
+    return y
